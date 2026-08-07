@@ -5,6 +5,9 @@ Multi-Platform SaaS WebSocket Supply Chain — Defensive Detection Tool
 Scans node_modules for compromise indicators across 7 SaaS platforms:
 Sendbird, Pusher, PubNub, Stream, Firebase, Socket.io, Azure Web PubSub.
 
+Detects pre-npm-v12 (preinstall hooks) AND post-npm-v12 (binding.gyp node-gyp
+abuse, install-time execution vectors) supply chain compromise patterns.
+
 USAGE:
   python3 detect.py /path/to/project     Scan for compromise
   python3 detect.py --simulate           Show how C2 blends into WSS traffic
@@ -42,6 +45,23 @@ INDICATORS = [
      r'"postinstall"\s*:',
      "npm postinstall script — executes after install",
      "HIGH"),
+
+    # ── Post-npm-v12 vectors ─────────────────────────────
+
+    ("binding_gyp",
+     r"binding\.gyp",
+     "binding.gyp file present — node-gyp executes code during npm install without preinstall hook. Used by Miasma worm (2026).",
+     "HIGH"),
+
+    ("gyp_command_substitution",
+     r"<\s*!\s*@\s*\(\s*.*?\|\|.*?\)\s*>",
+     "node-gyp command substitution in .gyp file — arbitrary code execution at npm install (Miasma technique).",
+     "HIGH"),
+
+    ("gyp_shell_exec",
+     r'"variables"\s*:\s*\{[^}]*"command"\s*:',
+     "node-gyp variable with 'command' key — may execute shell commands during build.",
+     "MEDIUM"),
 
     ("base64_payload",
      r'(?:["\'])((?:[A-Za-z0-9+/]{40,}={0,2})|(?:[A-Za-z0-9+/]{60,}={0,2}))(?:["\'])',
@@ -198,7 +218,7 @@ def scan_project(scan_path: str, ignore_patterns: set[str] | None = None) -> tup
     for root, dirs, files in os.walk(scan_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
         for fname in files:
-            if not fname.endswith((".js", ".json", ".ts", ".mjs", ".cjs")):
+            if not fname.endswith((".js", ".json", ".ts", ".mjs", ".cjs", ".gyp", ".gypi")):
                 continue
             fpath = os.path.join(root, fname)
             if is_ignored(fpath, scan_path, ignore_patterns):
